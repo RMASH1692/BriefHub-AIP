@@ -2,61 +2,96 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>Aviation Info Portal</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aviation Information Hub</title>
     <style>
-        body { font-family: sans-serif; max-width: 800px; margin: 40px auto; line-height: 1.6; background: #f4f7f9; }
-        .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-        .list-item { border-bottom: 1px solid #eee; padding: 10px 0; display: flex; justify-content: space-between; }
-        button { padding: 10px 20px; cursor: pointer; background: #0056b3; color: white; border: none; border-radius: 4px; }
-        .back-btn { background: #666; margin-bottom: 20px; }
+        body { font-family: Arial, sans-serif; color: #333; max-width: 900px; margin: 0 auto; padding: 20px; background-color: #fff; }
+        h2 { text-align: center; font-weight: normal; border-bottom: 2px solid #0078D4; padding-bottom: 15px; margin-bottom: 20px; letter-spacing: 1px; color: #0078D4; }
+        .search-container { display: flex; gap: 15px; justify-content: center; align-items: center; margin-bottom: 30px; flex-wrap: wrap; background: #f8f9fa; padding: 15px; border-radius: 8px; }
+        
+        button { padding: 10px 20px; font-size: 16px; background-color: #0078D4; color: white; border: none; cursor: pointer; border-radius: 4px; transition: 0.2s; }
+        button:hover { background-color: #005a9e; }
+        .btn-secondary { background-color: #6c757d; }
+        .btn-pdf { background-color: #28a745; text-decoration: none; display: inline-block; color: white; border-radius: 4px; padding: 8px 15px; font-size: 14px; }
+        
+        .card { border-left: 4px solid #0078D4; border-top: 1px solid #eee; border-right: 1px solid #eee; border-bottom: 1px solid #eee; padding: 20px; margin-bottom: 20px; border-radius: 0 4px 4px 0; background: #fff; }
+        .card h3 { margin: 0 0 15px 0; font-size: 18px; color: #0078D4; border-bottom: 1px dashed #eee; padding-bottom: 10px; display: flex; justify-content: space-between; align-items: center; }
+        
+        .list-row { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid #f0f0f0; }
+        .nr-tag { background: #eef6fc; color: #0078D4; padding: 2px 8px; border-radius: 4px; font-weight: bold; margin-right: 10px; font-size: 0.9em; }
+        .title-text { flex-grow: 1; margin-right: 15px; font-size: 15px; }
+        
+        .breadcrumb { margin-bottom: 20px; font-size: 14px; color: #666; }
+        .breadcrumb span { cursor: pointer; color: #0078D4; text-decoration: underline; }
     </style>
 </head>
 <body>
-    <div id="app" class="card">
-        <h1>航空情報ポータル</h1>
-        <div id="content"></div>
-    </div>
+
+    <h2>航空情報 (AIC / AIP SUP)</h2>
+
+    <div class="search-container" id="nav-container">
+        </div>
+    
+    <div id="breadcrumb-container" class="breadcrumb"></div>
+    <div id="result-container"></div>
 
     <script>
         let fullData = {};
-        let currentCategory = "";
+        let state = { view: 'home', category: '', date: '' };
 
         async function init() {
             const res = await fetch('data.json');
             fullData = await res.json();
-            showHome();
+            render();
         }
 
-        function showHome() {
-            const html = `
-                <p>カテゴリーを選択してください：</p>
-                <button onclick="showDates('AIC')">AIC</button>
-                <button onclick="showDates('AIP SUP')">AIP SUP</button>
-            `;
-            document.getElementById('content').innerHTML = html;
+        function render() {
+            const nav = document.getElementById('nav-container');
+            const res = document.getElementById('result-container');
+            const bread = document.getElementById('breadcrumb-container');
+            
+            nav.innerHTML = '';
+            res.innerHTML = '';
+            bread.innerHTML = '';
+
+            if (state.view === 'home') {
+                nav.innerHTML = `
+                    <button onclick="setView('category', 'AIC')">AIC を表示</button>
+                    <button onclick="setView('category', 'AIP SUP')">AIP SUP を表示</button>
+                `;
+            } else if (state.view === 'category') {
+                bread.innerHTML = `<span onclick="setView('home')">TOP</span> > ${state.category}`;
+                const dates = Object.keys(fullData[state.category] || {}).sort().reverse();
+                
+                res.innerHTML = `<div class="card"><h3>発行日を選択してください</h3><div id="date-list"></div></div>`;
+                const list = res.querySelector('#date-list');
+                dates.forEach(d => {
+                    list.innerHTML += `
+                        <div class="list-row">
+                            <span>${d}</span>
+                            <button onclick="setView('list', '${state.category}', '${d}')">一覧を表示</button>
+                        </div>`;
+                });
+            } else if (state.view === 'list') {
+                bread.innerHTML = `<span onclick="setView('home')">TOP</span> > <span onclick="setView('category', '${state.category}')">${state.category}</span> > ${state.date}`;
+                const items = fullData[state.category][state.date];
+
+                items.forEach(item => {
+                    res.innerHTML += `
+                        <div class="card">
+                            <h3>
+                                <span><span class="nr-tag">NR ${item.nr}</span></span>
+                                <a href="${item.path}" target="_blank" class="btn-pdf">閲覧 (PDF)</a>
+                            </h3>
+                            <div class="title-text">${item.title}</div>
+                        </div>`;
+                });
+            }
         }
 
-        function showDates(cat) {
-            currentCategory = cat;
-            const dates = Object.keys(fullData[cat] || {}).sort().reverse();
-            let html = `<button class="back-btn" onclick="showHome()">← 戻る</button><h3>${cat} - 発行日を選択</h3>`;
-            dates.forEach(date => {
-                html += `<div class="list-item"><span>${date}</span><button onclick="showList('${date}')">表示</button></div>`;
-            });
-            document.getElementById('content').innerHTML = html;
-        }
-
-        function showList(date) {
-            const items = fullData[currentCategory][date];
-            let html = `<button class="back-btn" onclick="showDates('${currentCategory}')">← 戻る</button><h3>${date} 一覧</h3>`;
-            items.forEach(item => {
-                html += `
-                    <div class="list-item">
-                        <span><strong>NR ${item.nr}</strong>: ${item.title}</span>
-                        <a href="${item.path}" target="_blank"><button>閲覧 (PDF)</button></a>
-                    </div>`;
-            });
-            document.getElementById('content').innerHTML = html;
+        function setView(v, cat = '', date = '') {
+            state = { view: v, category: cat, date: date };
+            render();
         }
 
         init();
