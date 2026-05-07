@@ -4,31 +4,26 @@ on:
   push:
     paths:
       - 'raw_data/**'
-      - 'scripts/**'
-      - 'public/index.html'
     branches:
       - main
-  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4 # 最新のv4を使用
-
-      - name: Set up Python
-        uses: actions/setup-python@v5 # 最新のv5を使用
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install pymupdf # requirements.txtを使わず直接インストールしてもOK
-
-      - name: Process PDFs
-        run: python scripts/process_pdfs.py
-
+      - run: pip install pymupdf
+      - run: python scripts/process_pdfs.py
+      - name: Deploy
+        uses: cloudflare/pages-action@v1
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          projectName: briefhub-aip
+          directory: public
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/pages-action@v1 # v2ではなくv1を指定
         with:
