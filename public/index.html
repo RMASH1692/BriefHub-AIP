@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>Aviation Info Portal</title>
+    <style>
+        body { font-family: sans-serif; max-width: 800px; margin: 40px auto; line-height: 1.6; background: #f4f7f9; }
+        .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .list-item { border-bottom: 1px solid #eee; padding: 10px 0; display: flex; justify-content: space-between; }
+        button { padding: 10px 20px; cursor: pointer; background: #0056b3; color: white; border: none; border-radius: 4px; }
+        .back-btn { background: #666; margin-bottom: 20px; }
+    </style>
+</head>
+<body>
+    <div id="app" class="card">
+        <h1>航空情報ポータル</h1>
+        <div id="content"></div>
+    </div>
+
+    <script>
+        let fullData = {};
+        let currentCategory = "";
+
+        async function init() {
+            const res = await fetch('data.json');
+            fullData = await res.json();
+            showHome();
+        }
+
+        function showHome() {
+            const html = `
+                <p>カテゴリーを選択してください：</p>
+                <button onclick="showDates('AIC')">AIC</button>
+                <button onclick="showDates('AIP SUP')">AIP SUP</button>
+            `;
+            document.getElementById('content').innerHTML = html;
+        }
+
+        function showDates(cat) {
+            currentCategory = cat;
+            const dates = Object.keys(fullData[cat] || {}).sort().reverse();
+            let html = `<button class="back-btn" onclick="showHome()">← 戻る</button><h3>${cat} - 発行日を選択</h3>`;
+            dates.forEach(date => {
+                html += `<div class="list-item"><span>${date}</span><button onclick="showList('${date}')">表示</button></div>`;
+            });
+            document.getElementById('content').innerHTML = html;
+        }
+
+        function showList(date) {
+            const items = fullData[currentCategory][date];
+            let html = `<button class="back-btn" onclick="showDates('${currentCategory}')">← 戻る</button><h3>${date} 一覧</h3>`;
+            items.forEach(item => {
+                html += `
+                    <div class="list-item">
+                        <span><strong>NR ${item.nr}</strong>: ${item.title}</span>
+                        <a href="${item.path}" target="_blank"><button>閲覧 (PDF)</button></a>
+                    </div>`;
+            });
+            document.getElementById('content').innerHTML = html;
+        }
+
+        init();
+    </script>
+</body>
+</html>
