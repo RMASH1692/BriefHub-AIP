@@ -3,21 +3,29 @@ import os
 import json
 import re
 
-# タイトルとして抽出しないキーワード
+# タイトルに含めないキーワード
 SKIP_KEYWORDS = [
     "また、新情報", "及び変更部", "表示される", "JAPAN", "MINISTRY OF", 
     "CIVIL AVIATION", "AIP SUP", "NR", "AERONAUTICAL", "Changes are", 
     "This AIP", "Tel:", "Fax:", "E-mail", "helpdesk", "AFTN:", "ページ",
-    "取り消す", "再発行", "斜体文字", "太い縦線", "期間:", "Period:", "位置:", "Position:"
+    "取り消す", "再発行", "斜体文字", "太い縦線", "ATTACHMENT", "参照"
 ]
 
+def is_body_text(text):
+    """句点（。）が含まれる、または特定の動詞で終わる場合は『本文』とみなす"""
+    text = text.strip()
+    if "。" in text: return True
+    if text.endswith("される") or text.endswith("実施される"): return True
+    # 箇条書きや英語の開始も本文とみなす
+    if text.startswith("・") or re.match(r'^[a-zA-Z]{2,}', text): return True
+    return False
+
 def is_valid_title_part(text):
-    """行がタイトルの一部として適切か（日本語を含み、禁止語句でないか）を判定"""
+    """行がタイトルの一部として適切か判定"""
     text = text.strip()
     if not text or len(text) < 2: return False
-    # 禁止キーワードが含まれていたらNG
     if any(k in text for k in SKIP_KEYWORDS): return False
-    # 記号や数字だけの行、または完全に英語だけの行（英語タイトル）は日本語タイトルの終わりとみなす
+    # 完全に英語・数字・記号だけの行は、日本語タイトルの終わりとみなす
     if re.fullmatch(r'[a-zA-Z\s\(\)\d\.,\-/!&]+', text): return False
     return True
 
@@ -25,7 +33,7 @@ def process_pdf(category, input_path, output_dir, web_data):
     try:
         doc = fitz.open(input_path)
     except Exception as e:
-        print(f"Error opening {input_path}: {e}")
+        print(f"Error: {e}")
         return
 
     file_name = os.path.basename(input_path)
@@ -44,70 +52,67 @@ def process_pdf(category, input_path, output_dir, web_data):
 
     for page_num in range(len(doc)):
         page = doc[page_num]
-        # ページ上部（ヘッダーエリア）のみを対象にNRを探す（y=300以下程度）
-        # 座標取得のために get_text("blocks") を使用
         blocks = page.get_text("blocks")
         
-        # ページ内のテキストをリスト化
-        all_lines = [b[4].strip() for b in blocks if b[4].strip()]
-        
-        # ヘッダー領域にあるNRを特定
+        # ヘッダー領域にあるNRを特定 (y座標が250以下のもの)
         found_nr_on_page = None
         for b in blocks:
             x0, y0, x1, y1, text, block_no, block_type = b
-            # y1 < 250 (上部約1/4) の位置にある NR XXX/XX を探す
-            nr_search = re.search(r'(?:NR\s?)?(\d{3}/\d{2})', text)
+            # NR 000/00 の形式を厳格にチェック
+            nr_search = re.search(r'^NR\s*(\d{3}/\d{2})$|^\s*(\d{3}/\d{2})\s*$', text.strip())
             if nr_search and y1 < 250:
-                found_nr_on_page = nr_search.group(1)
+                found_nr_on_page = nr_search.group(1) or nr_search.group(2)
                 break
         
         if found_nr_on_page:
             new_nr = found_nr_on_page
-            
-            # 既にNRを処理中の場合、新しいNRが出たら前のを保存
             if current_nr and new_nr != current_nr:
                 save_split_pdf(doc, start_page, page_num - 1, category, date_str, current_nr, output_dir)
                 web_data[category][formatted_date].append({
-                    "nr": current_nr, "title": current_title,
+                    "nr": current_nr, "title": current_title.strip(),
                     "path": f"pdfs/{category.replace(' ', '_')}_{date_str}_{current_nr.replace('/', '-')}.pdf"
                 })
 
-            # 新しいセクションの開始
             current_nr = new_nr
             start_page = page_num
             current_title = ""
 
-            # --- タイトル抽出（複数行対応） ---
-            # NRが見つかった箇所以降のブロックをスキャン
-            found_first_line = False
-            for b in blocks:
-                # NRが見つかった行、あるいはその後の上部エリアのテキストをタイトル候補にする
-                txt = b[4].strip()
-                # y座標がNRと同じか少し下、かつ本文(y>500)より上
-                if b[1] > 100 and b[3] < 500:
-                    lines_in_block = [l.strip() for l in txt.split('\n') if l.strip()]
-                    for line in lines_in_block:
-                        # NRそのものや、明らかにタイトルでない行はスキップ
-                        if current_nr in line or any(k in line for k in SKIP_KEYWORDS):
-                            continue
-                        
-                        if is_valid_title_part(line):
-                            if not current_title:
-                                current_title = line
-                            else:
-                                current_title += " " + line
-                            found_first_line = True
-                        elif found_first_line:
-                            # 一度タイトルを拾い始めた後、無効な行（英語等）が出たら終了
-                            break
-                    if found_first_line and not is_valid_title_part(txt.split('\n')[-1]):
+            # --- タイトル抽出ロジック（本文巻き込み防止） ---
+            found_title_lines = []
+            # y座標がNR(y0)より下、かつ ページ中央(y=500)より上のブロックを調査
+            for b in sorted(blocks, key=lambda x: x[1]): # 上から順に
+                if b[1] < 100: continue # NRより上の連絡先などは無視
+                if b[1] > 500: break    # ページ下部は無視
+                
+                txt_block = b[4].strip()
+                if current_nr in txt_block or any(k in txt_block for k in SKIP_KEYWORDS):
+                    continue
+                
+                # ブロック内の各行をチェック
+                stop_collecting = False
+                for line in txt_block.split('\n'):
+                    line = line.strip()
+                    if is_body_text(line):
+                        # 本文（句点など）が出てきたら、その行の「。」の前までをタイトルにするか、そこで打ち切る
+                        if "。" in line:
+                            potential_end = line.split("。")[0]
+                            if is_valid_title_part(potential_end) and len(potential_end) > 2:
+                                found_title_lines.append(potential_end)
+                        stop_collecting = True
                         break
+                    
+                    if is_valid_title_part(line):
+                        found_title_lines.append(line)
+                
+                if stop_collecting or (found_title_lines and b[1] > 400):
+                    break
+            
+            current_title = " ".join(found_title_lines) if found_title_lines else "No Title Detected"
 
-    # 最後のセクションを保存
     if current_nr:
         save_split_pdf(doc, start_page, len(doc) - 1, category, date_str, current_nr, output_dir)
         web_data[category][formatted_date].append({
-            "nr": current_nr, "title": current_title,
+            "nr": current_nr, "title": current_title.strip(),
             "path": f"pdfs/{category.replace(' ', '_')}_{date_str}_{current_nr.replace('/', '-')}.pdf"
         })
 
