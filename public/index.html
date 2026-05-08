@@ -11,15 +11,15 @@
         
         button { padding: 10px 20px; font-size: 16px; background-color: #0078D4; color: white; border: none; cursor: pointer; border-radius: 4px; transition: 0.2s; }
         button:hover { background-color: #005a9e; }
-        .btn-secondary { background-color: #6c757d; }
-        .btn-pdf { background-color: #28a745; text-decoration: none; display: inline-block; color: white; border-radius: 4px; padding: 8px 15px; font-size: 14px; }
+        .btn-pdf { background-color: #28a745; text-decoration: none; display: inline-block; color: white; border-radius: 4px; padding: 10px 20px; font-size: 15px; font-weight: bold; }
+        .btn-pdf:hover { background-color: #218838; }
         
-        .card { border-left: 4px solid #0078D4; border-top: 1px solid #eee; border-right: 1px solid #eee; border-bottom: 1px solid #eee; padding: 20px; margin-bottom: 20px; border-radius: 0 4px 4px 0; background: #fff; }
-        .card h3 { margin: 0 0 15px 0; font-size: 18px; color: #0078D4; border-bottom: 1px dashed #eee; padding-bottom: 10px; display: flex; justify-content: space-between; align-items: center; }
+        .card { border-left: 4px solid #0078D4; border: 1px solid #eee; border-left-width: 4px; padding: 15px 20px; margin-bottom: 15px; border-radius: 4px; background: #fff; display: flex; justify-content: space-between; align-items: center; transition: box-shadow 0.2s; }
+        .card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+        .card h3 { margin: 0; font-size: 18px; color: #0078D4; font-weight: normal; }
         
         .list-row { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid #f0f0f0; }
-        .nr-tag { background: #eef6fc; color: #0078D4; padding: 2px 8px; border-radius: 4px; font-weight: bold; margin-right: 10px; font-size: 0.9em; }
-        .title-text { flex-grow: 1; margin-right: 15px; font-size: 15px; }
+        .nr-tag { font-size: 22px; font-weight: bold; color: #333; letter-spacing: 1px; }
         
         .breadcrumb { margin-bottom: 20px; font-size: 14px; color: #666; }
         .breadcrumb span { cursor: pointer; color: #0078D4; text-decoration: underline; }
@@ -29,8 +29,7 @@
 
     <h2>航空情報 (AIC / AIP SUP)</h2>
 
-    <div class="search-container" id="nav-container">
-        </div>
+    <div class="search-container" id="nav-container"></div>
     
     <div id="breadcrumb-container" class="breadcrumb"></div>
     <div id="result-container"></div>
@@ -40,9 +39,13 @@
         let state = { view: 'home', category: '', date: '' };
 
         async function init() {
-            const res = await fetch('data.json');
-            fullData = await res.json();
-            render();
+            try {
+                const res = await fetch('data.json');
+                fullData = await res.json();
+                render();
+            } catch (e) {
+                document.getElementById('result-container').innerHTML = '<p style="text-align:center; color:red;">データの読み込みに失敗しました。</p>';
+            }
         }
 
         function render() {
@@ -63,12 +66,12 @@
                 bread.innerHTML = `<span onclick="setView('home')">TOP</span> > ${state.category}`;
                 const dates = Object.keys(fullData[state.category] || {}).sort().reverse();
                 
-                res.innerHTML = `<div class="card"><h3>発行日を選択してください</h3><div id="date-list"></div></div>`;
+                res.innerHTML = `<div style="background:#fff; padding:20px; border:1px solid #eee; border-radius:4px;"><h3 style="margin-top:0; color:#0078D4;">発行日を選択してください</h3><div id="date-list"></div></div>`;
                 const list = res.querySelector('#date-list');
                 dates.forEach(d => {
                     list.innerHTML += `
                         <div class="list-row">
-                            <span>${d}</span>
+                            <span style="font-size:16px; font-weight:bold;">${d}</span>
                             <button onclick="setView('list', '${state.category}', '${d}')">一覧を表示</button>
                         </div>`;
                 });
@@ -79,11 +82,8 @@
                 items.forEach(item => {
                     res.innerHTML += `
                         <div class="card">
-                            <h3>
-                                <span><span class="nr-tag">NR ${item.nr}</span></span>
-                                <a href="${item.path}" target="_blank" class="btn-pdf">閲覧 (PDF)</a>
-                            </h3>
-                            <div class="title-text">${item.title}</div>
+                            <div class="nr-tag">NR ${item.nr}</div>
+                            <a href="${item.path}" target="_blank" class="btn-pdf">閲覧 (PDF)</a>
                         </div>`;
                 });
             }
