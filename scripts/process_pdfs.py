@@ -3,14 +3,11 @@ import os
 import json
 import re
 
-# ヘッダーとして無視する文字列
-IGNORE_TEXTS = ["JAPAN", "AIP SUP", "AIC", "NR", "TEL:", "FAX:", "E-MAIL"]
-
 def process_pdf(category, input_path, output_dir, web_data):
     try:
         doc = fitz.open(input_path)
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"Error opening {input_path}: {e}")
         return
 
     file_name = os.path.basename(input_path)
@@ -24,21 +21,16 @@ def process_pdf(category, input_path, output_dir, web_data):
         web_data[category][formatted_date] = []
 
     current_nr = None
-    current_title = ""
     start_page = 0
 
     for page_num in range(len(doc)):
         page = doc[page_num]
         blocks = page.get_text("blocks")
-        # y座標でソート（上から順に処理）
-        blocks.sort(key=lambda b: b[1])
         
         found_nr_on_page = None
         for b in blocks:
             x0, y0, x1, y1, text, block_no, block_type = b
-            text = text.strip()
-            
-            # ページ上部(y < 300)で "数字3桁/数字2桁" を探す（一番最初に見つかったものを採用）
+            # y1 < 300 (ページ上部) で "数字3桁/数字2桁" を探す
             nr_match = re.search(r'(\d{3}/\d{2})', text)
             if nr_match and y1 < 300:
                 found_nr_on_page = nr_match.group(1)
@@ -50,45 +42,18 @@ def process_pdf(category, input_path, output_dir, web_data):
             if current_nr and new_nr != current_nr:
                 save_split_pdf(doc, start_page, page_num - 1, category, date_str, current_nr, output_dir)
                 web_data[category][formatted_date].append({
-                    "nr": current_nr, "title": current_title,
+                    "nr": current_nr,
                     "path": f"pdfs/{category.replace(' ', '_')}_{date_str}_{current_nr.replace('/', '-')}.pdf"
                 })
 
             current_nr = new_nr
             start_page = page_num
-            
-            # --- タイトル抽出（シンプル版） ---
-            title_parts = []
-            for b in blocks:
-                txt = b[4].strip().replace('\n', ' ')
-                # y座標がNRブロックより下で、かつ本文エリア(y > 500)より上のもの
-                if b[1] > 100 and b[3] < 500:
-                    # 無視リストに入っている単語、またはNR番号自体はスキップ
-                    if any(ig in txt.upper() for ig in IGNORE_TEXTS) or current_nr in txt:
-                        continue
-                    
-                    # 句点（。）や、特定のキーワードが出たら本文とみなして終了
-                    if "。" in txt or "1." in txt or "期間" in txt or "Period" in txt:
-                        # 句点がある場合、その手前までをタイトルに加える
-                        if "。" in txt:
-                            title_parts.append(txt.split("。")[0])
-                        break
-                    
-                    # 日本語が含まれている場合のみタイトルとして採用
-                    if re.search(r'[^\x00-\x7F]+', txt):
-                        title_parts.append(txt)
-                
-                # タイトルが2つ以上のブロックに渡ることは稀なので、2つ拾ったら安全のために終了
-                if len(title_parts) >= 2:
-                    break
-            
-            current_title = " ".join(title_parts) if title_parts else "No Title"
 
     # 最後のNRセクションを保存
     if current_nr:
         save_split_pdf(doc, start_page, len(doc) - 1, category, date_str, current_nr, output_dir)
         web_data[category][formatted_date].append({
-            "nr": current_nr, "title": current_title,
+            "nr": current_nr,
             "path": f"pdfs/{category.replace(' ', '_')}_{date_str}_{current_nr.replace('/', '-')}.pdf"
         })
 
