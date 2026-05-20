@@ -1,100 +1,277 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Aviation Information Hub</title>
-    <style>
-        body { font-family: Arial, sans-serif; color: #333; max-width: 900px; margin: 0 auto; padding: 20px; background-color: #fff; }
-        h2 { text-align: center; font-weight: normal; border-bottom: 2px solid #0078D4; padding-bottom: 15px; margin-bottom: 20px; letter-spacing: 1px; color: #0078D4; }
-        .search-container { display: flex; gap: 15px; justify-content: center; align-items: center; margin-bottom: 30px; flex-wrap: wrap; background: #f8f9fa; padding: 15px; border-radius: 8px; }
-        
-        button { padding: 10px 20px; font-size: 16px; background-color: #0078D4; color: white; border: none; cursor: pointer; border-radius: 4px; transition: 0.2s; }
-        button:hover { background-color: #005a9e; }
-        .btn-pdf { background-color: #28a745; text-decoration: none; display: inline-block; color: white; border-radius: 4px; padding: 10px 20px; font-size: 15px; font-weight: bold; }
-        .btn-pdf:hover { background-color: #218838; }
-        
-        .card { border-left: 4px solid #0078D4; border: 1px solid #eee; border-left-width: 4px; padding: 15px 20px; margin-bottom: 15px; border-radius: 4px; background: #fff; display: flex; justify-content: space-between; align-items: center; transition: box-shadow 0.2s; }
-        .card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
-        .card h3 { margin: 0; font-size: 18px; color: #0078D4; font-weight: normal; }
-        
-        .list-row { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid #f0f0f0; }
-        .nr-tag { font-size: 22px; font-weight: bold; color: #333; letter-spacing: 1px; }
-        
-        .breadcrumb { margin-bottom: 20px; font-size: 14px; color: #666; }
-        .breadcrumb span { cursor: pointer; color: #0078D4; text-decoration: underline; }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Aviation Information Hub</title>
+  <style>
+    :root {
+      --primary: #0078D4;
+      --primary-dark: #005a9e;
+      --success: #28a745;
+      --success-dark: #218838;
+      --text: #333;
+      --sub: #666;
+      --border: #e8edf3;
+      --bg-soft: #f8f9fa;
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: Arial, sans-serif;
+      color: var(--text);
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 20px;
+      background-color: #fff;
+    }
+    h2 {
+      text-align: center;
+      font-weight: normal;
+      border-bottom: 2px solid var(--primary);
+      padding-bottom: 15px;
+      margin-bottom: 20px;
+      letter-spacing: 1px;
+      color: var(--primary);
+    }
+    .search-container {
+      display: flex;
+      gap: 15px;
+      justify-content: center;
+      align-items: center;
+      margin-bottom: 24px;
+      flex-wrap: wrap;
+      background: var(--bg-soft);
+      padding: 15px;
+      border-radius: 8px;
+    }
+    button, .btn-pdf {
+      padding: 10px 18px;
+      font-size: 15px;
+      color: #fff;
+      border: none;
+      cursor: pointer;
+      border-radius: 4px;
+      transition: 0.2s;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+    button { background-color: var(--primary); }
+    button:hover { background-color: var(--primary-dark); }
+    .btn-pdf { background-color: var(--success); font-weight: bold; }
+    .btn-pdf:hover { background-color: var(--success-dark); }
+    .breadcrumb { margin-bottom: 18px; font-size: 14px; color: var(--sub); }
+    .breadcrumb button {
+      background: none;
+      color: var(--primary);
+      padding: 0;
+      border: none;
+      text-decoration: underline;
+      font-size: inherit;
+    }
+    .panel {
+      background: #fff;
+      padding: 20px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+    }
+    .panel h3 { margin-top: 0; color: var(--primary); }
+    .list-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+      padding: 12px 0;
+      border-bottom: 1px solid #f0f0f0;
+    }
+    .date-label { font-size: 16px; font-weight: bold; }
+    .card {
+      border: 1px solid var(--border);
+      border-left: 4px solid var(--primary);
+      padding: 14px 18px;
+      margin-bottom: 12px;
+      border-radius: 5px;
+      background: #fff;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 18px;
+      transition: box-shadow 0.2s;
+    }
+    .card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+    .nr-line { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+    .nr-tag { font-size: 21px; font-weight: bold; color: var(--text); letter-spacing: 1px; flex: 0 0 auto; }
+    .title { color: var(--sub); line-height: 1.5; font-size: 14px; }
+    .meta { margin-top: 3px; color: #888; font-size: 12px; }
+    .empty, .error { text-align: center; padding: 24px; }
+    .error { color: #c00; }
+    @media (max-width: 560px) {
+      body { padding: 14px; }
+      .card, .list-row { align-items: stretch; flex-direction: column; }
+      .nr-line { display: block; }
+      .title { margin-top: 4px; }
+      .btn-pdf, .list-row button { text-align: center; width: 100%; }
+    }
+  </style>
 </head>
 <body>
+  <h2>航空情報 (AIC / AIP SUP)</h2>
+  <div class="search-container" id="nav-container"></div>
+  <div id="breadcrumb-container" class="breadcrumb"></div>
+  <div id="result-container"></div>
 
-    <h2>航空情報 (AIC / AIP SUP)</h2>
+  <script>
+    let fullData = {};
+    let state = { view: 'home', category: '', date: '' };
 
-    <div class="search-container" id="nav-container"></div>
-    
-    <div id="breadcrumb-container" class="breadcrumb"></div>
-    <div id="result-container"></div>
+    const nav = document.getElementById('nav-container');
+    const result = document.getElementById('result-container');
+    const breadcrumb = document.getElementById('breadcrumb-container');
 
-    <script>
-        let fullData = {};
-        let state = { view: 'home', category: '', date: '' };
+    async function init() {
+      try {
+        const response = await fetch('data.json', { cache: 'no-store' });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        fullData = await response.json();
+        render();
+      } catch (e) {
+        result.innerHTML = '<p class="error">データの読み込みに失敗しました。</p>';
+        console.error(e);
+      }
+    }
 
-        async function init() {
-            try {
-                const res = await fetch('data.json');
-                fullData = await res.json();
-                render();
-            } catch (e) {
-                document.getElementById('result-container').innerHTML = '<p style="text-align:center; color:red;">データの読み込みに失敗しました。</p>';
-            }
+    function clear(el) {
+      el.replaceChildren();
+    }
+
+    function addButton(parent, label, onClick) {
+      const button = document.createElement('button');
+      button.textContent = label;
+      button.addEventListener('click', onClick);
+      parent.appendChild(button);
+      return button;
+    }
+
+    function renderBreadcrumb(parts) {
+      clear(breadcrumb);
+      parts.forEach((part, index) => {
+        if (index > 0) breadcrumb.append(' > ');
+        if (part.onClick) {
+          addButton(breadcrumb, part.label, part.onClick);
+        } else {
+          breadcrumb.append(part.label);
+        }
+      });
+    }
+
+    function render() {
+      clear(nav);
+      clear(result);
+      clear(breadcrumb);
+
+      if (state.view === 'home') {
+        addButton(nav, 'AIC を表示', () => setView('category', 'AIC'));
+        addButton(nav, 'AIP SUP を表示', () => setView('category', 'AIP SUP'));
+        return;
+      }
+
+      if (state.view === 'category') {
+        renderBreadcrumb([
+          { label: 'TOP', onClick: () => setView('home') },
+          { label: state.category }
+        ]);
+
+        const dates = Object.keys(fullData[state.category] || {}).sort().reverse();
+        if (!dates.length) {
+          result.innerHTML = '<p class="empty">表示できるデータがありません。</p>';
+          return;
         }
 
-        function render() {
-            const nav = document.getElementById('nav-container');
-            const res = document.getElementById('result-container');
-            const bread = document.getElementById('breadcrumb-container');
-            
-            nav.innerHTML = '';
-            res.innerHTML = '';
-            bread.innerHTML = '';
+        const panel = document.createElement('div');
+        panel.className = 'panel';
+        const heading = document.createElement('h3');
+        heading.textContent = '発行日を選択してください';
+        panel.appendChild(heading);
 
-            if (state.view === 'home') {
-                nav.innerHTML = `
-                    <button onclick="setView('category', 'AIC')">AIC を表示</button>
-                    <button onclick="setView('category', 'AIP SUP')">AIP SUP を表示</button>
-                `;
-            } else if (state.view === 'category') {
-                bread.innerHTML = `<span onclick="setView('home')">TOP</span> > ${state.category}`;
-                const dates = Object.keys(fullData[state.category] || {}).sort().reverse();
-                
-                res.innerHTML = `<div style="background:#fff; padding:20px; border:1px solid #eee; border-radius:4px;"><h3 style="margin-top:0; color:#0078D4;">発行日を選択してください</h3><div id="date-list"></div></div>`;
-                const list = res.querySelector('#date-list');
-                dates.forEach(d => {
-                    list.innerHTML += `
-                        <div class="list-row">
-                            <span style="font-size:16px; font-weight:bold;">${d}</span>
-                            <button onclick="setView('list', '${state.category}', '${d}')">一覧を表示</button>
-                        </div>`;
-                });
-            } else if (state.view === 'list') {
-                bread.innerHTML = `<span onclick="setView('home')">TOP</span> > <span onclick="setView('category', '${state.category}')">${state.category}</span> > ${state.date}`;
-                const items = fullData[state.category][state.date];
+        dates.forEach(date => {
+          const row = document.createElement('div');
+          row.className = 'list-row';
+          const label = document.createElement('span');
+          label.className = 'date-label';
+          const count = fullData[state.category][date]?.length || 0;
+          label.textContent = `${date}（${count}件）`;
+          row.appendChild(label);
+          addButton(row, '一覧を表示', () => setView('list', state.category, date));
+          panel.appendChild(row);
+        });
+        result.appendChild(panel);
+        return;
+      }
 
-                items.forEach(item => {
-                    res.innerHTML += `
-                        <div class="card">
-                            <div class="nr-tag">NR ${item.nr}</div>
-                            <a href="${item.path}" target="_blank" class="btn-pdf">閲覧 (PDF)</a>
-                        </div>`;
-                });
-            }
+      if (state.view === 'list') {
+        renderBreadcrumb([
+          { label: 'TOP', onClick: () => setView('home') },
+          { label: state.category, onClick: () => setView('category', state.category) },
+          { label: state.date }
+        ]);
+
+        const items = fullData[state.category]?.[state.date] || [];
+        if (!items.length) {
+          result.innerHTML = '<p class="empty">表示できるPDFがありません。</p>';
+          return;
         }
 
-        function setView(v, cat = '', date = '') {
-            state = { view: v, category: cat, date: date };
-            render();
-        }
+        items.forEach(item => {
+          const card = document.createElement('div');
+          card.className = 'card';
 
-        init();
-    </script>
+          const body = document.createElement('div');
+          const nrLine = document.createElement('div');
+          nrLine.className = 'nr-line';
+
+          const nr = document.createElement('div');
+          nr.className = 'nr-tag';
+          nr.textContent = `NR ${item.nr}`;
+          nrLine.appendChild(nr);
+
+          const title = item.title_ja || item.title || item.title_en || '';
+          if (title) {
+            const titleEl = document.createElement('div');
+            titleEl.className = 'title';
+            titleEl.textContent = title;
+            nrLine.appendChild(titleEl);
+          }
+
+          body.appendChild(nrLine);
+
+          if (item.pages || item.source_pages) {
+            const meta = document.createElement('div');
+            meta.className = 'meta';
+            const pageText = item.pages ? `${item.pages}ページ` : '';
+            const sourceText = Array.isArray(item.source_pages) ? `元PDF: p.${item.source_pages[0]}-${item.source_pages[1]}` : '';
+            meta.textContent = [pageText, sourceText].filter(Boolean).join(' / ');
+            body.appendChild(meta);
+          }
+
+          const link = document.createElement('a');
+          link.href = item.path;
+          link.target = '_blank';
+          link.rel = 'noopener';
+          link.className = 'btn-pdf';
+          link.textContent = '閲覧 (PDF)';
+
+          card.appendChild(body);
+          card.appendChild(link);
+          result.appendChild(card);
+        });
+      }
+    }
+
+    function setView(view, category = '', date = '') {
+      state = { view, category, date };
+      render();
+    }
+
+    init();
+  </script>
 </body>
 </html>
