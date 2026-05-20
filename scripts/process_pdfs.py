@@ -18,9 +18,65 @@ NR_RE = re.compile(r"^\d{3}/\d{2}$")
 DATE_RE = re.compile(r"(\d{8})")
 
 
+# -----------------------------
+# 共通ユーティリティ
+# -----------------------------
 def normalize_text(text: str) -> str:
-    """改行や連続空白をならして、ヘッダー判定を安定させる。"""
+    """改行や連続空白をならして、判定や表示を安定させる。"""
     return re.sub(r"\s+", " ", text).strip()
+
+
+def clean_title_line(line: str) -> str:
+    """PDFから抽出したタイトル行を表示しやすい形に整える。"""
+    line = line.replace("\u3000", " ")
+    line = re.sub(r"\s+", " ", line).strip()
+    return line
+
+
+def is_ascii_title_char(char: str) -> bool:
+    """和文タイトル内の英数字語句を自然につなぐための簡易判定。"""
+    return bool(re.match(r"[A-Za-z0-9)\]％%°./-]", char))
+
+
+def smart_join_ja_title(lines: list[str]) -> str:
+    """
+    日本語タイトルの改行を自然につなぐ。
+
+    PDFでは「について」が「につい / て」のように分割されることがあるため、
+    日本語同士は空白なしで連結する。
+    一方で "Target / Start" のような英数字語句の改行は空白を入れる。
+    """
+    result = ""
+
+    for line in lines:
+        line = clean_title_line(line)
+        if not line:
+            continue
+
+        if not result:
+            result = line
+            continue
+
+        prev = result[-1]
+        first = line[0]
+
+        if is_ascii_title_char(prev) and is_ascii_title_char(first):
+            result += " " + line
+        else:
+            result += line
+
+    return normalize_text(result)
+
+
+def join_title_lines(lines: list[str], side: str = "ja") -> str:
+    """複数行タイトルを1行にまとめる。"""
+    cleaned = [clean_title_line(line) for line in lines]
+    cleaned = [line for line in cleaned if line]
+
+    if side == "ja":
+        return smart_join_ja_title(cleaned)
+
+    return normalize_text(" ".join(cleaned))
 
 
 def get_issue_date_from_filename(input_path: Path) -> tuple[str, str]:
@@ -45,6 +101,9 @@ def detect_category(file_name: str) -> str:
     return "AIC"
 
 
+# -----------------------------
+# PDF検出・抽出処理
+# -----------------------------
 def has_document_header(page: fitz.Page, category: str) -> bool:
     """
     そのページが各PDF内の「新しい文書の1ページ目」かを判定する。
@@ -113,6 +172,137 @@ def extract_nr_from_title_area(page: fitz.Page) -> str | None:
     return candidates[0][1]
 
 
+def extract_title_from_block(page: fitz.Page, nr: str, side: str) -> str:
+    """
+    タイトルブロックからタイトルを抽出する。
+
+    side='ja' は左側の日本語タイトル、side='en' は右側の英語タイトルを対象にする。
+    本文中の NR や取消対象NRを拾わないよう、NRを含むタイトルブロックだけを見る。
+    """
+    if side == "ja":
+        x_min, x_max = 45, 315
+        # 和文タイトルは長い場合でも y=190pt 付近までに収まることが多い
+        y_min, y_max = 120, 205
+    else:
+        x_min, x_max = 305, 570
+        y_min, y_max = 120, 210
+
+    candidates: list[tuple[float, str]] = []
+
+    for x0, y0, x1, y1, text, *_ in page.get_text("blocks"):
+        # 対象側・タイトル付近のブロックに限定
+        if not (x0 >= x_min and x0 <= x_max and y0 <= y_max and y1 >= y_min):
+            continue
+
+        raw_lines = [line.strip() for line in text.splitlines()]
+        lines = [line for line in raw_lines if line.strip()]
+
+        # このブロックに対象NRが無い場合はタイトルブロックではない
+        if nr not in lines and nr not in text:
+            continue
+
+        title_lines: list[str] = []
+        nr_seen = False
+
+        for line in lines:
+            clean = clean_title_line(line)
+
+            # 単独の NR 行を見つけた後の行をタイトルとして扱う
+            if NR_RE.fullmatch(clean):
+                if clean == nr:
+                    nr_seen = True
+                    continue
+
+            if nr_seen:
+                # 念のため、次の番号・日付らしき行が来たら止める
+                if NR_RE.fullmatch(clean):
+                    break
+                if re.fullmatch(r"\d{1,2}/\d{1,2}/\d{2,4}", clean):
+                    break
+                title_lines.append(clean)
+
+        title = join_title_lines(title_lines, side)
+        if title:
+            # タイトルブロックとして自然な位置のものを優先
+            score = 100 - abs(y0 - 135)
+            if side == "ja" and x0 < 120:
+                score += 20
+            if side == "en" and 310 <= x0 <= 330:
+                score += 20
+            candidates.append((score, title))
+
+    if not candidates:
+        return ""
+
+    candidates.sort(reverse=True)
+    return candidates[0][1]
+
+
+def extract_title_from_words(page: fitz.Page, nr: str, side: str) -> str:
+    """
+    ブロック抽出でタイトルが取れない場合の予備処理。
+    タイトル付近の単語を行ごとにまとめる。
+    """
+    if side == "ja":
+        x_min, x_max = 45, 315
+    else:
+        x_min, x_max = 305, 570
+
+    words_by_line: dict[float, list[tuple[float, str]]] = {}
+    nr_line_y: float | None = None
+
+    for x0, y0, x1, y1, word, *_ in page.get_text("words"):
+        if not (x_min <= x0 <= x_max and 130 <= y0 <= 190):
+            continue
+
+        # y座標を丸めて同じ行として扱う
+        line_y = round(y0 / 2) * 2
+
+        if word == nr:
+            nr_line_y = line_y
+            continue
+
+        words_by_line.setdefault(line_y, []).append((x0, word))
+
+    if nr_line_y is None:
+        return ""
+
+    title_lines: list[str] = []
+    for line_y in sorted(words_by_line.keys()):
+        # NR行より下、本文開始より上の行だけをタイトル候補にする
+        if line_y <= nr_line_y:
+            continue
+        if line_y > 180:
+            continue
+
+        words = [word for _, word in sorted(words_by_line[line_y])]
+        line = clean_title_line(" ".join(words))
+        if line and not NR_RE.fullmatch(line):
+            title_lines.append(line)
+
+    return join_title_lines(title_lines, side)
+
+
+def extract_titles(page: fitz.Page, nr: str) -> dict[str, str]:
+    """文書1ページ目から日本語タイトル・英語タイトルを抽出する。"""
+    title_ja = extract_title_from_block(page, nr, "ja")
+    if not title_ja:
+        title_ja = extract_title_from_words(page, nr, "ja")
+
+    title_en = extract_title_from_block(page, nr, "en")
+    if not title_en:
+        title_en = extract_title_from_words(page, nr, "en")
+
+    # 表示用の代表タイトル。日本語を優先し、取れない場合は英語にする。
+    title = title_ja or title_en
+
+    return {
+        "title": title,
+        "title_ja": title_ja,
+        "title_en": title_en,
+    }
+
+
 def find_sections(doc: fitz.Document, category: str) -> list[dict]:
     """
     結合PDF内の各文書の開始・終了ページを検出する。
@@ -120,6 +310,7 @@ def find_sections(doc: fitz.Document, category: str) -> list[dict]:
     """
     sections: list[dict] = []
     current_nr: str | None = None
+    current_titles: dict[str, str] = {"title": "", "title_ja": "", "title_en": ""}
     start_page: int | None = None
 
     for page_index in range(len(doc)):
@@ -136,16 +327,23 @@ def find_sections(doc: fitz.Document, category: str) -> list[dict]:
         if current_nr is not None and start_page is not None:
             sections.append({
                 "nr": current_nr,
+                "title": current_titles.get("title", ""),
+                "title_ja": current_titles.get("title_ja", ""),
+                "title_en": current_titles.get("title_en", ""),
                 "start": start_page,
                 "end": page_index - 1,
             })
 
         current_nr = nr
+        current_titles = extract_titles(page, nr)
         start_page = page_index
 
     if current_nr is not None and start_page is not None:
         sections.append({
             "nr": current_nr,
+            "title": current_titles.get("title", ""),
+            "title_ja": current_titles.get("title_ja", ""),
+            "title_en": current_titles.get("title_en", ""),
             "start": start_page,
             "end": len(doc) - 1,
         })
@@ -153,6 +351,9 @@ def find_sections(doc: fitz.Document, category: str) -> list[dict]:
     return sections
 
 
+# -----------------------------
+# 出力処理
+# -----------------------------
 def save_split_pdf(doc: fitz.Document, start: int, end: int, output_path: Path) -> None:
     """指定ページ範囲を別PDFとして保存する。"""
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -208,12 +409,16 @@ def process_pdf(category: str, input_path: Path, output_dir: Path, web_data: dic
 
             save_split_pdf(doc, start, end, output_path)
 
-            web_data[category][formatted_date].append({
+            item = {
                 "nr": nr,
+                "title": section.get("title", ""),
+                "title_ja": section.get("title_ja", ""),
+                "title_en": section.get("title_en", ""),
                 "path": f"pdfs/{file_name}",
                 # 確認用。不要なら削除してもOK。
                 "pages": f"{start + 1}-{end + 1}",
-            })
+            }
+            web_data[category][formatted_date].append(item)
 
         print(f"OK: {input_path.name} -> {len(sections)} files")
 
@@ -243,6 +448,9 @@ def write_data_json(web_data: dict) -> None:
     print(f"DONE: {DATA_JSON}")
 
 
+# -----------------------------
+# Cloudflare Pages 用 index.html
+# -----------------------------
 def build_fallback_index_html() -> str:
     """
     index.html がリポジトリ直下にも public 内にも無い場合の最低限のトップページ。
@@ -292,10 +500,37 @@ def build_fallback_index_html() -> str:
     .item:last-child {
       border-bottom: 0;
     }
+    .nr-title {
+      display: flex;
+      gap: 10px;
+      align-items: baseline;
+      min-width: 0;
+    }
+    .nr {
+      flex: 0 0 auto;
+      font-weight: 700;
+    }
+    .title {
+      color: #555;
+      line-height: 1.5;
+    }
     a {
       color: #075a9c;
       text-decoration: none;
       font-weight: 600;
+      white-space: nowrap;
+    }
+    @media (max-width: 560px) {
+      .item {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+      .nr-title {
+        display: block;
+      }
+      .title {
+        margin-top: 4px;
+      }
     }
   </style>
 </head>
@@ -304,6 +539,15 @@ def build_fallback_index_html() -> str:
   <div id="app">読み込み中...</div>
 
   <script>
+    function escapeHTML(value) {
+      return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
+
     async function main() {
       const app = document.getElementById("app");
 
@@ -321,7 +565,7 @@ def build_fallback_index_html() -> str:
         for (const [category, dates] of Object.entries(data)) {
           const section = document.createElement("section");
           section.className = "section";
-          section.innerHTML = `<h2>${category}</h2>`;
+          section.innerHTML = `<h2>${escapeHTML(category)}</h2>`;
 
           for (const [date, items] of Object.entries(dates)) {
             const dateEl = document.createElement("div");
@@ -332,9 +576,15 @@ def build_fallback_index_html() -> str:
             for (const item of items) {
               const row = document.createElement("div");
               row.className = "item";
+
+              const title = item.title_ja || item.title || item.title_en || "";
+
               row.innerHTML = `
-                <span>NR ${item.nr}</span>
-                <a href="${item.path}" target="_blank" rel="noopener">PDFを開く</a>
+                <span class="nr-title">
+                  <span class="nr">NR ${escapeHTML(item.nr)}</span>
+                  <span class="title">${escapeHTML(title)}</span>
+                </span>
+                <a href="${escapeHTML(item.path)}" target="_blank" rel="noopener">PDFを開く</a>
               `;
               section.appendChild(row);
             }
