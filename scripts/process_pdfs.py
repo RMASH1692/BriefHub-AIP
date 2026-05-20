@@ -1,7 +1,7 @@
 import fitz  # PyMuPDF
-import os
 import json
 import re
+import shutil
 from pathlib import Path
 
 # 現在の構成に合わせた出力先
@@ -9,6 +9,10 @@ RAW_DIR = Path("raw_data")
 PUBLIC_DIR = Path("public")
 PDF_OUT_DIR = PUBLIC_DIR / "pdfs"
 DATA_JSON = PUBLIC_DIR / "data.json"
+
+# Cloudflare Pages は Build output directory の直下に index.html が必要
+ROOT_INDEX_HTML = Path("index.html")
+PUBLIC_INDEX_HTML = PUBLIC_DIR / "index.html"
 
 NR_RE = re.compile(r"^\d{3}/\d{2}$")
 DATE_RE = re.compile(r"(\d{8})")
@@ -229,29 +233,173 @@ def sort_web_data(web_data: dict) -> dict:
     return sorted_data
 
 
+def write_data_json(web_data: dict) -> None:
+    """public/data.json を書き出す。"""
+    DATA_JSON.parent.mkdir(parents=True, exist_ok=True)
+
+    with DATA_JSON.open("w", encoding="utf-8") as f:
+        json.dump(sort_web_data(web_data), f, ensure_ascii=False, indent=2)
+
+    print(f"DONE: {DATA_JSON}")
+
+
+def build_fallback_index_html() -> str:
+    """
+    index.html がリポジトリ直下にも public 内にも無い場合の最低限のトップページ。
+    通常はリポジトリ直下の index.html を public/index.html にコピーして使う。
+    """
+    return """<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Aviation Information Hub</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 24px;
+      color: #222;
+      background: #fff;
+    }
+    h1 {
+      font-size: 24px;
+      font-weight: 600;
+      margin: 0 0 16px;
+      color: #075a9c;
+      border-bottom: 2px solid #075a9c;
+      padding-bottom: 12px;
+    }
+    .section {
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      padding: 16px;
+      margin: 16px 0;
+    }
+    .date {
+      font-weight: 700;
+      margin-top: 16px;
+    }
+    .item {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: center;
+      padding: 10px 0;
+      border-bottom: 1px solid #eee;
+    }
+    .item:last-child {
+      border-bottom: 0;
+    }
+    a {
+      color: #075a9c;
+      text-decoration: none;
+      font-weight: 600;
+    }
+  </style>
+</head>
+<body>
+  <h1>航空情報 AIC / AIP SUP</h1>
+  <div id="app">読み込み中...</div>
+
+  <script>
+    async function main() {
+      const app = document.getElementById("app");
+
+      try {
+        const res = await fetch("data.json", { cache: "no-store" });
+        const data = await res.json();
+
+        if (!Object.keys(data).length) {
+          app.textContent = "表示できるPDFデータがありません。";
+          return;
+        }
+
+        app.innerHTML = "";
+
+        for (const [category, dates] of Object.entries(data)) {
+          const section = document.createElement("section");
+          section.className = "section";
+          section.innerHTML = `<h2>${category}</h2>`;
+
+          for (const [date, items] of Object.entries(dates)) {
+            const dateEl = document.createElement("div");
+            dateEl.className = "date";
+            dateEl.textContent = date;
+            section.appendChild(dateEl);
+
+            for (const item of items) {
+              const row = document.createElement("div");
+              row.className = "item";
+              row.innerHTML = `
+                <span>NR ${item.nr}</span>
+                <a href="${item.path}" target="_blank" rel="noopener">PDFを開く</a>
+              `;
+              section.appendChild(row);
+            }
+          }
+
+          app.appendChild(section);
+        }
+      } catch (error) {
+        app.textContent = "data.json の読み込みに失敗しました。";
+      }
+    }
+
+    main();
+  </script>
+</body>
+</html>
+"""
+
+
+def ensure_public_index_html() -> None:
+    """
+    Cloudflare Pages のトップページ 404 対策。
+    Build output directory が public の場合、public/index.html が無いと / が 404 になる。
+    """
+    PUBLIC_DIR.mkdir(parents=True, exist_ok=True)
+
+    if ROOT_INDEX_HTML.exists():
+        shutil.copy2(ROOT_INDEX_HTML, PUBLIC_INDEX_HTML)
+        print(f"OK: copied {ROOT_INDEX_HTML} -> {PUBLIC_INDEX_HTML}")
+        return
+
+    if PUBLIC_INDEX_HTML.exists():
+        print(f"OK: {PUBLIC_INDEX_HTML} already exists")
+        return
+
+    PUBLIC_INDEX_HTML.write_text(build_fallback_index_html(), encoding="utf-8")
+    print(f"WARNING: {ROOT_INDEX_HTML} was not found. Created fallback {PUBLIC_INDEX_HTML}")
+
+
 def main() -> None:
+    PUBLIC_DIR.mkdir(parents=True, exist_ok=True)
     PDF_OUT_DIR.mkdir(parents=True, exist_ok=True)
+
+    # 先に index.html を用意することで、PDF処理側に問題があってもトップページの404を避ける
+    ensure_public_index_html()
+
     web_data: dict = {}
 
     if not RAW_DIR.exists():
         print(f"ERROR: raw_data folder was not found: {RAW_DIR}")
+        write_data_json(web_data)
         return
 
     pdf_files = sorted([p for p in RAW_DIR.iterdir() if p.suffix.lower() == ".pdf"])
 
     if not pdf_files:
         print("WARNING: no PDF files found in raw_data")
+        write_data_json(web_data)
         return
 
     for pdf_path in pdf_files:
         category = detect_category(pdf_path.name)
         process_pdf(category, pdf_path, PDF_OUT_DIR, web_data)
 
-    DATA_JSON.parent.mkdir(parents=True, exist_ok=True)
-    with DATA_JSON.open("w", encoding="utf-8") as f:
-        json.dump(sort_web_data(web_data), f, ensure_ascii=False, indent=2)
-
-    print(f"DONE: {DATA_JSON}")
+    write_data_json(web_data)
 
 
 if __name__ == "__main__":
